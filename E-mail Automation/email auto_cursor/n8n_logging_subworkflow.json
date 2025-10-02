@@ -1,0 +1,301 @@
+{
+  "name": "학회 이메일 자동화 - 로깅 서브워크플로우",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-automation-log",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "id": "webhook-trigger-log",
+      "name": "Webhook - 로그 수신",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        240,
+        300
+      ],
+      "webhookId": "email-automation-log-receiver"
+    },
+    {
+      "parameters": {
+        "jsCode": "// 수신된 로그 데이터 파싱 및 검증\nconst inputData = items[0].json;\nconst parsedLogs = [];\n\n// 단일 로그 또는 배치 로그 처리\nconst logsArray = Array.isArray(inputData) ? inputData : [inputData];\n\nfor (const logEntry of logsArray) {\n  // 필수 필드 검증\n  if (logEntry.timestamp && logEntry.recipient_email) {\n    const processedLog = {\n      id: `log_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,\n      timestamp: logEntry.timestamp,\n      recipient_email: logEntry.recipient_email,\n      recipient_name: logEntry.recipient_name || 'Unknown',\n      template_type: logEntry.template_type || 'unknown',\n      status: logEntry.status || 'unknown',\n      country: logEntry.country || 'Unknown',\n      grade: logEntry.grade || 'Unknown',\n      affiliation: logEntry.affiliation || 'Unknown',\n      presentation_time: logEntry.presentation_time || '',\n      travel_grant: logEntry.travel_grant || '',\n      error_message: logEntry.error_message || null,\n      error_details: logEntry.error_details || null,\n      processed_at: new Date().toISOString(),\n      batch_id: logEntry.batch_id || `batch_${new Date().toISOString().split('T')[0]}`\n    };\n    \n    parsedLogs.push(processedLog);\n  } else {\n    console.log(`Invalid log entry: ${JSON.stringify(logEntry)}`);\n  }\n}\n\nconsole.log(`Processed ${parsedLogs.length} valid log entries`);\n\nreturn parsedLogs.map(log => ({ json: log }));"
+      },
+      "id": "parse-log-data",
+      "name": "로그 데이터 파싱",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "sheetName": "Email_Logs",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "id": "={{ $json.id }}",
+            "timestamp": "={{ $json.timestamp }}",
+            "recipient_email": "={{ $json.recipient_email }}",
+            "recipient_name": "={{ $json.recipient_name }}",
+            "template_type": "={{ $json.template_type }}",
+            "status": "={{ $json.status }}",
+            "country": "={{ $json.country }}",
+            "grade": "={{ $json.grade }}",
+            "affiliation": "={{ $json.affiliation }}",
+            "presentation_time": "={{ $json.presentation_time }}",
+            "travel_grant": "={{ $json.travel_grant }}",
+            "error_message": "={{ $json.error_message }}",
+            "error_details": "={{ $json.error_details }}",
+            "processed_at": "={{ $json.processed_at }}",
+            "batch_id": "={{ $json.batch_id }}"
+          }
+        },
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "save-to-sheets",
+      "name": "Google Sheets - 로그 저장",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        680,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credential-id",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "filePath": "/tmp/email_logs.json",
+        "operation": "write",
+        "options": {
+          "encoding": "utf8"
+        }
+      },
+      "id": "save-to-json",
+      "name": "JSON 파일 저장",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        680,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 대시보드용 요약 통계 생성\nconst allLogs = items;\nconst summary = {\n  total_emails: allLogs.length,\n  successful_sends: allLogs.filter(item => item.json.status === 'sent').length,\n  failed_sends: allLogs.filter(item => item.json.status === 'failed').length,\n  by_template: {},\n  by_country: {},\n  by_grade: {},\n  last_updated: new Date().toISOString(),\n  batch_summary: {}\n};\n\n// 템플릿별 통계\nallLogs.forEach(item => {\n  const templateType = item.json.template_type;\n  summary.by_template[templateType] = (summary.by_template[templateType] || 0) + 1;\n});\n\n// 국가별 통계\nallLogs.forEach(item => {\n  const country = item.json.country;\n  summary.by_country[country] = (summary.by_country[country] || 0) + 1;\n});\n\n// 등급별 통계\nallLogs.forEach(item => {\n  const grade = item.json.grade;\n  summary.by_grade[grade] = (summary.by_grade[grade] || 0) + 1;\n});\n\n// 배치별 통계\nconst batchCounts = {};\nallLogs.forEach(item => {\n  const batchId = item.json.batch_id;\n  batchCounts[batchId] = (batchCounts[batchId] || 0) + 1;\n});\nsummary.batch_summary = batchCounts;\n\n// 성공률 계산\nsummary.success_rate = summary.total_emails > 0 ? \n  (summary.successful_sends / summary.total_emails * 100).toFixed(2) + '%' : '0%';\n\nconsole.log('Dashboard summary generated:', JSON.stringify(summary, null, 2));\n\nreturn [{ json: summary }];"
+      },
+      "id": "generate-dashboard-summary",
+      "name": "대시보드 요약 생성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "sheetName": "Dashboard_Summary",
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $json.last_updated.split('T')[0] }}",
+            "total_emails": "={{ $json.total_emails }}",
+            "successful_sends": "={{ $json.successful_sends }}",
+            "failed_sends": "={{ $json.failed_sends }}",
+            "success_rate": "={{ $json.success_rate }}",
+            "premium_invites": "={{ $json.by_template.premium_invite || 0 }}",
+            "standard_invites": "={{ $json.by_template.standard_invite || 0 }}",
+            "basic_invites": "={{ $json.by_template.basic_invite || 0 }}",
+            "grade_a_count": "={{ $json.by_grade.A || 0 }}",
+            "grade_b_count": "={{ $json.by_grade.B || 0 }}",
+            "grade_c_count": "={{ $json.by_grade.C || 0 }}",
+            "last_updated": "={{ $json.last_updated }}"
+          }
+        },
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "update-dashboard",
+      "name": "대시보드 업데이트",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        1120,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credential-id",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "error-threshold-condition",
+              "leftValue": "={{ $json.failed_sends }}",
+              "rightValue": 5,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "error-threshold-check",
+      "name": "오류 임계치 확인",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendEmail",
+        "to": "admin@conference.com",
+        "subject": "이메일 자동화 오류 알림",
+        "bodyType": "text",
+        "body": "이메일 발송 중 다수의 오류가 발생했습니다.\\n\\n실패 건수: {{ $json.failed_sends }}\\n전체 건수: {{ $json.total_emails }}\\n실패율: {{ (100 - parseFloat($json.success_rate)).toFixed(2) }}%\\n\\n확인이 필요합니다.",
+        "options": {
+          "priority": "high"
+        }
+      },
+      "id": "send-alert-email",
+      "name": "관리자 알림 발송",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        1120,
+        580
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "outlook-credential-id",
+          "name": "Microsoft Outlook Account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Webhook - 로그 수신": {
+      "main": [
+        [
+          {
+            "node": "로그 데이터 파싱",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "로그 데이터 파싱": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - 로그 저장",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "JSON 파일 저장",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - 로그 저장": {
+      "main": [
+        [
+          {
+            "node": "대시보드 요약 생성",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "대시보드 요약 생성": {
+      "main": [
+        [
+          {
+            "node": "대시보드 업데이트",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "오류 임계치 확인",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "오류 임계치 확인": {
+      "main": [
+        [],
+        [
+          {
+            "node": "관리자 알림 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-20T10:00:00.000Z",
+      "updatedAt": "2025-01-20T10:00:00.000Z",
+      "id": "conference-email-logging",
+      "name": "학회 이메일 로깅"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-20T10:00:00.000Z",
+  "versionId": "1.0.0"
+}

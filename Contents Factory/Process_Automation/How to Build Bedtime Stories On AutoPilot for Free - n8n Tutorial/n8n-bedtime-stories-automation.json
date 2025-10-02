@@ -1,0 +1,715 @@
+{
+  "name": "Bedtime Stories Automation Workflow",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours",
+              "hoursInterval": 6
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [100, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "readRows",
+        "documentId": "={{ $json.sheetId }}",
+        "sheetName": "Stories",
+        "options": {
+          "filters": {
+            "status": "pending"
+          },
+          "returnOnlyFirstMatch": true
+        }
+      },
+      "id": "google-sheets-read",
+      "name": "Get Pending Stories",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [300, 300]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-flash",
+        "prompt": "Create a bedtime story with 40 chapters based on theme: {{ $json.theme }}. Instructions: {{ $json.instructions }}. Return structured JSON with chapters array containing: chapter_number, title, description, image_prompt.",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 4000
+        }
+      },
+      "id": "ai-agent-chapters",
+      "name": "Generate Chapters",
+      "type": "n8n-nodes-base.aiAgent",
+      "typeVersion": 1,
+      "position": [500, 300]
+    },
+    {
+      "parameters": {
+        "schemaType": "object",
+        "schema": {
+          "type": "object",
+          "properties": {
+            "chapters": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "chapter_number": {"type": "number"},
+                  "title": {"type": "string"},
+                  "description": {"type": "string"},
+                  "image_prompt": {"type": "string"}
+                }
+              }
+            }
+          }
+        }
+      },
+      "id": "structured-output-parser",
+      "name": "Parse Chapters",
+      "type": "n8n-nodes-base.structuredOutputParser",
+      "typeVersion": 1,
+      "position": [700, 300]
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "chapters",
+        "options": {}
+      },
+      "id": "split-chapters",
+      "name": "Split Chapters",
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-flash",
+        "prompt": "Based on this chapter: {{ $json.description }}, create a detailed image prompt for: {{ $('Get Pending Stories').first().$json.style_reference }}. Make it cinematic and atmospheric for a bedtime story.",
+        "options": {
+          "temperature": 0.8
+        }
+      },
+      "id": "ai-agent-images",
+      "name": "Generate Image Prompts",
+      "type": "n8n-nodes-base.aiAgent",
+      "typeVersion": 1,
+      "position": [1100, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Prepare image generation data\nconst items = [];\nfor (let i = 0; i < $input.all().length; i++) {\n  const item = $input.all()[i];\n  items.push({\n    index: i,\n    chapter_number: item.json.chapter_number,\n    encoded_prompt: encodeURIComponent(item.json.image_prompt),\n    filename: `story_${String(i).padStart(3, '0')}.jpg`\n  });\n}\nreturn items;"
+      },
+      "id": "code-prepare-images",
+      "name": "Prepare Image Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 200]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-images",
+      "name": "Loop Images",
+      "type": "n8n-nodes-base.loop",
+      "typeVersion": 1,
+      "position": [1500, 200]
+    },
+    {
+      "parameters": {
+        "amount": 7,
+        "unit": "seconds"
+      },
+      "id": "wait",
+      "name": "Wait",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1,
+      "position": [1700, 200]
+    },
+    {
+      "parameters": {
+        "method": "GET",
+        "url": "https://image.pollinations.ai/prompt/{{ $json.encoded_prompt }}",
+        "options": {
+          "queryParameters": {
+            "width": "1920",
+            "height": "1080",
+            "model": "flux",
+            "enhance": "true",
+            "nologo": "true"
+          },
+          "response": {
+            "responseFormat": "file",
+            "outputPropertyName": "image"
+          }
+        }
+      },
+      "id": "generate-image",
+      "name": "Generate Image",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [1900, 200]
+    },
+    {
+      "parameters": {
+        "mode": "extractFromFile",
+        "extractFromFile": {
+          "binaryPropertyName": "image",
+          "outputPropertyName": "image_data"
+        }
+      },
+      "id": "extract-from-file",
+      "name": "Extract Image Data",
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1,
+      "position": [2100, 200]
+    },
+    {
+      "parameters": {
+        "mode": "base64ToBinary",
+        "base64ToBinary": {
+          "base64PropertyName": "image_data",
+          "binaryPropertyName": "image"
+        },
+        "options": {
+          "fileName": "={{ $json.filename }}"
+        }
+      },
+      "id": "convert-to-file-image",
+      "name": "Convert to Image File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1,
+      "position": [2300, 200]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "path": "/home/node/shared/bedtime-stories/images/{{ $json.filename }}",
+        "binaryPropertyName": "image"
+      },
+      "id": "save-image",
+      "name": "Save Image",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [2500, 200]
+    },
+    {
+      "parameters": {
+        "model": "gemini-1.5-flash",
+        "prompt": "Create a detailed bedtime story script based on these chapters: {{ $json.chapters }}. Make it soothing, engaging, and approximately 2-3 hours long when narrated. Include natural pauses and transitions between chapters.",
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 8000
+        }
+      },
+      "id": "ai-agent-script",
+      "name": "Generate Full Script",
+      "type": "n8n-nodes-base.aiAgent",
+      "typeVersion": 1,
+      "position": [1100, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Text trimming for TTS limitations\nconst text = $json.script || $json.text;\nconst maxChars = 4500; // Google TTS limit\nconst chunks = [];\n\nif (text.length <= maxChars) {\n  chunks.push({ text: text, index: 0 });\n} else {\n  let start = 0;\n  let index = 0;\n  \n  while (start < text.length) {\n    let end = start + maxChars;\n    \n    if (end < text.length) {\n      // Find last sentence end\n      const lastPeriod = text.lastIndexOf('.', end);\n      const lastExclamation = text.lastIndexOf('!', end);\n      const lastQuestion = text.lastIndexOf('?', end);\n      \n      end = Math.max(lastPeriod, lastExclamation, lastQuestion) + 1;\n      if (end <= start) end = start + maxChars;\n    }\n    \n    chunks.push({\n      text: text.substring(start, end).trim(),\n      index: index++\n    });\n    \n    start = end;\n  }\n}\n\nreturn chunks;"
+      },
+      "id": "text-trimming",
+      "name": "Text Trimming",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1300, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Text adjustments for better TTS\nconst text = $json.text;\nconst adjustedText = text\n  .replace(/\\n\\n+/g, '. ') // Replace multiple newlines\n  .replace(/\\s+/g, ' ') // Normalize spaces\n  .replace(/([.!?])\\s*([A-Z])/g, '$1 $2') // Ensure space after punctuation\n  .trim();\n\nreturn {\n  ...($json),\n  adjusted_text: adjustedText,\n  filename: `audio_${String($json.index).padStart(3, '0')}.mp3`\n};"
+      },
+      "id": "text-adjustments",
+      "name": "Text Adjustments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1500, 400]
+    },
+    {
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      },
+      "id": "loop-audio",
+      "name": "Loop Audio",
+      "type": "n8n-nodes-base.loop",
+      "typeVersion": 1,
+      "position": [1700, 400]
+    },
+    {
+      "parameters": {
+        "command": "gcloud auth application-default print-access-token"
+      },
+      "id": "google-jwt-token",
+      "name": "Get Google Token",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [1900, 400]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://texttospeech.googleapis.com/v1/text:synthesize",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "Authorization",
+              "value": "Bearer {{ $('Get Google Token').first().$json.stdout.trim() }}"
+            },
+            {
+              "name": "x-goog-user-project",
+              "value": "{{ $vars.GOOGLE_PROJECT_ID }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "input",
+              "value": "={{ { \"text\": $json.adjusted_text } }}"
+            },
+            {
+              "name": "voice",
+              "value": "={{ { \"languageCode\": \"en-US\", \"name\": \"en-US-Journey-D\", \"ssmlGender\": \"MALE\" } }}"
+            },
+            {
+              "name": "audioConfig",
+              "value": "={{ { \"audioEncoding\": \"MP3\", \"speakingRate\": 0.9, \"pitch\": 0 } }}"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "responseFormat": "json"
+          }
+        }
+      },
+      "id": "google-tts",
+      "name": "Google TTS",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [2100, 400]
+    },
+    {
+      "parameters": {
+        "mode": "base64ToBinary",
+        "base64ToBinary": {
+          "base64PropertyName": "audioContent",
+          "binaryPropertyName": "audio"
+        },
+        "options": {
+          "fileName": "={{ $json.filename }}"
+        }
+      },
+      "id": "convert-to-audio-file",
+      "name": "Convert to Audio File",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1,
+      "position": [2300, 400]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "path": "/home/node/shared/bedtime-stories/audio/{{ $json.filename }}",
+        "binaryPropertyName": "audio"
+      },
+      "id": "save-audio",
+      "name": "Save Audio",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [2500, 400]
+    },
+    {
+      "parameters": {
+        "mode": "mergeByIndex",
+        "options": {}
+      },
+      "id": "merge",
+      "name": "Merge Assets",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2.1,
+      "position": [2700, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/node/shared/bedtime-stories && echo 'file audio/audio_000.mp3' > audio/audios.txt && for i in {001..039}; do echo \"file audio/audio_$i.mp3\" >> audio/audios.txt; done"
+      },
+      "id": "create-audio-list",
+      "name": "Create Audio List",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [2900, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/node/shared/bedtime-stories && ffmpeg -y -framerate 1/15 -i images/story_%03d.jpg -i overlay/overlay.mov -filter_complex \"[0:v]scale=1920:1080:force_original_aspect_ratio=increase,crop=1920:1080,zoompan=z='min(zoom+0.0015,1.3)':d=375:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':s=1920x1080[bg];[1:v]scale=1920:1080,format=rgba[overlay];[bg][overlay]blend=all_mode=overlay:all_opacity=0.7\" -c:v libx264 -r 30 -pix_fmt yuv420p temp_video.mp4"
+      },
+      "id": "execute-ffmpeg-video",
+      "name": "Create Video with Images",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [3100, 300]
+    },
+    {
+      "parameters": {
+        "command": "cd /home/node/shared/bedtime-stories && ffmpeg -y -stream_loop -1 -i temp_video.mp4 -f concat -safe 0 -i audio/audios.txt -i sfx/sfx_0.mp3 -filter_complex \"[1:a]volume=0.8[voice];[2:a]volume=0.3,aloop=loop=-1:size=2e+09[sfx];[voice][sfx]amix=inputs=2:duration=first:dropout_transition=2\" -c:v copy -c:a aac -shortest final_video/bedtime_story_$(date +%Y%m%d_%H%M%S).mp4"
+      },
+      "id": "execute-ffmpeg-final",
+      "name": "Create Final Video",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [3300, 300]
+    },
+    {
+      "parameters": {
+        "authentication": "serviceAccount",
+        "resource": "sheet",
+        "operation": "updateRow",
+        "documentId": "={{ $('Get Pending Stories').first().$json.sheetId }}",
+        "sheetName": "Stories",
+        "rowNumber": "={{ $('Get Pending Stories').first().$json.rowNumber }}",
+        "options": {
+          "cellFormat": "USER_ENTERED",
+          "valueInputOption": "USER_ENTERED"
+        },
+        "fieldsUi": {
+          "values": [
+            {
+              "column": "status",
+              "value": "completed"
+            },
+            {
+              "column": "completed_at",
+              "value": "={{ new Date().toISOString() }}"
+            }
+          ]
+        }
+      },
+      "id": "update-sheet-status",
+      "name": "Update Status to Completed",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [3500, 300]
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Get Pending Stories",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Pending Stories": {
+      "main": [
+        [
+          {
+            "node": "Generate Chapters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Chapters": {
+      "main": [
+        [
+          {
+            "node": "Parse Chapters",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Chapters": {
+      "main": [
+        [
+          {
+            "node": "Split Chapters",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Generate Full Script",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Chapters": {
+      "main": [
+        [
+          {
+            "node": "Generate Image Prompts",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image Prompts": {
+      "main": [
+        [
+          {
+            "node": "Prepare Image Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare Image Data": {
+      "main": [
+        [
+          {
+            "node": "Loop Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Images": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Generate Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Image": {
+      "main": [
+        [
+          {
+            "node": "Extract Image Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Image Data": {
+      "main": [
+        [
+          {
+            "node": "Convert to Image File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to Image File": {
+      "main": [
+        [
+          {
+            "node": "Save Image",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Generate Full Script": {
+      "main": [
+        [
+          {
+            "node": "Text Trimming",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Trimming": {
+      "main": [
+        [
+          {
+            "node": "Text Adjustments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text Adjustments": {
+      "main": [
+        [
+          {
+            "node": "Loop Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Audio": {
+      "main": [
+        [
+          {
+            "node": "Get Google Token",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Google Token": {
+      "main": [
+        [
+          {
+            "node": "Google TTS",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google TTS": {
+      "main": [
+        [
+          {
+            "node": "Convert to Audio File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Convert to Audio File": {
+      "main": [
+        [
+          {
+            "node": "Save Audio",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Image": {
+      "main": [
+        [
+          {
+            "node": "Merge Assets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save Audio": {
+      "main": [
+        [
+          {
+            "node": "Merge Assets",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge Assets": {
+      "main": [
+        [
+          {
+            "node": "Create Audio List",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Audio List": {
+      "main": [
+        [
+          {
+            "node": "Create Video with Images",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Video with Images": {
+      "main": [
+        [
+          {
+            "node": "Create Final Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Create Final Video": {
+      "main": [
+        [
+          {
+            "node": "Update Status to Completed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2024-01-01T00:00:00.000Z",
+      "updatedAt": "2024-01-01T00:00:00.000Z",
+      "id": "bedtime-stories",
+      "name": "Bedtime Stories"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2024-01-01T00:00:00.000Z",
+  "versionId": "1"
+}

@@ -1,0 +1,1116 @@
+{
+  "name": "YouTube Complete Automation System",
+  "version": "1.0.0",
+  "description": "백만 구독자 달성을 위한 완전 자동화 n8n 워크플로우",
+  "workflows": [
+    {
+      "name": "Main Trend Monitoring",
+      "id": "trend_monitoring_main",
+      "active": true,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{"field": "hours", "value": 1}]
+            }
+          },
+          "name": "Hourly Trend Check",
+          "type": "n8n-nodes-base.cron",
+          "typeVersion": 1,
+          "position": [240, 300],
+          "id": "node_001"
+        },
+        {
+          "parameters": {
+            "url": "https://www.googleapis.com/youtube/v3/videos",
+            "options": {
+              "queryParameters": {
+                "part": "statistics,snippet",
+                "chart": "mostPopular",
+                "regionCode": "KR",
+                "maxResults": 50,
+                "key": "={{$env.YOUTUBE_API_KEY}}"
+              }
+            }
+          },
+          "name": "YouTube Trending API",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [460, 200],
+          "id": "node_002"
+        },
+        {
+          "parameters": {
+            "url": "https://trends.google.com/trends/api/dailytrends",
+            "options": {
+              "queryParameters": {
+                "hl": "ko-KR",
+                "tz": "-540",
+                "geo": "KR"
+              }
+            }
+          },
+          "name": "Google Trends API",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [460, 300],
+          "id": "node_003"
+        },
+        {
+          "parameters": {
+            "functionCode": "// 통합 트렌드 분석 및 스코어링\nconst youtubeItems = $input.first().json.items || [];\nconst googleTrends = $input.last().json || {};\n\nconst processedData = [];\n\n// YouTube 데이터 처리\nfor (const item of youtubeItems) {\n  const stats = item.statistics;\n  const snippet = item.snippet;\n  \n  // 조회수 기반 스코어 계산\n  const viewCount = parseInt(stats.viewCount) || 0;\n  const likeCount = parseInt(stats.likeCount) || 0;\n  const commentCount = parseInt(stats.commentCount) || 0;\n  \n  // 트렌드 스코어 공식 (스토리 방식 + 비즈니스 PT 지표)\n  const engagementRate = (likeCount + commentCount) / Math.max(viewCount, 1);\n  const velocityScore = viewCount / Math.max((Date.now() - new Date(snippet.publishedAt).getTime()) / (1000 * 60 * 60), 1);\n  \n  const trendScore = (\n    Math.log10(viewCount + 1) * 30 +\n    engagementRate * 1000 * 25 +\n    Math.log10(velocityScore + 1) * 20 +\n    (commentCount / Math.max(viewCount / 1000, 1)) * 25\n  );\n  \n  // 키워드 추출 (제목에서)\n  const keywords = snippet.title\n    .toLowerCase()\n    .replace(/[^가-힣a-zA-Z0-9\\s]/g, '')\n    .split(' ')\n    .filter(word => word.length > 1)\n    .slice(0, 5);\n  \n  processedData.push({\n    platform: 'youtube',\n    videoId: item.id,\n    title: snippet.title,\n    channelTitle: snippet.channelTitle,\n    channelId: snippet.channelId,\n    viewCount: viewCount,\n    likeCount: likeCount,\n    commentCount: commentCount,\n    engagementRate: Math.round(engagementRate * 10000) / 100,\n    trendScore: Math.round(trendScore * 100) / 100,\n    keywords: keywords,\n    publishedAt: snippet.publishedAt,\n    categoryId: snippet.categoryId,\n    thumbnailUrl: snippet.thumbnails?.high?.url || '',\n    duration: snippet.duration || '',\n    analyzedAt: new Date().toISOString()\n  });\n}\n\n// 스코어 기준 내림차순 정렬\nprocessedData.sort((a, b) => b.trendScore - a.trendScore);\n\n// 상위 20개만 반환\nreturn processedData.slice(0, 20).map(item => ({json: item}));"
+          },
+          "name": "Trend Analysis Engine",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [680, 250],
+          "id": "node_004"
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "number": [
+                {
+                  "value1": "={{$json.trendScore}}",
+                  "operation": "larger",
+                  "value2": 85
+                }
+              ]
+            }
+          },
+          "name": "High Impact Filter",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 1,
+          "position": [900, 250],
+          "id": "node_005"
+        },
+        {
+          "parameters": {
+            "channel": "#youtube-automation",
+            "text": "🚀 **HIGH IMPACT TREND DETECTED!**\\n\\n📊 **Trend Score**: {{$json.trendScore}}\\n🎬 **Title**: {{$json.title}}\\n📺 **Channel**: {{$json.channelTitle}}\\n👀 **Views**: {{$json.viewCount | number}}\\n❤️ **Engagement**: {{$json.engagementRate}}%\\n🔥 **Keywords**: {{$json.keywords.join(', ')}}\\n\\n**Action Required**: 즉시 관련 콘텐츠 제작을 시작하세요!\\n**Priority**: 🔴 HIGH\\n**Estimated ROI**: {{($json.trendScore * 1000) | number}} views potential",
+            "username": "TrendBot",
+            "iconEmoji": ":fire:"
+          },
+          "name": "Urgent Alert to Slack",
+          "type": "n8n-nodes-base.slack",
+          "typeVersion": 1,
+          "position": [1120, 150],
+          "id": "node_006"
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "table": "trend_analysis",
+            "columns": [
+              "platform",
+              "video_id",
+              "title",
+              "channel_title",
+              "channel_id",
+              "view_count",
+              "like_count",
+              "comment_count",
+              "engagement_rate",
+              "trend_score",
+              "keywords",
+              "published_at",
+              "category_id",
+              "thumbnail_url",
+              "analyzed_at"
+            ]
+          },
+          "name": "Store Trend Data",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [1120, 350],
+          "id": "node_007"
+        },
+        {
+          "parameters": {
+            "functionCode": "// 자동 콘텐츠 아이디어 생성 트리거\nconst highScoreItems = $input.all().filter(item => item.json.trendScore > 80);\n\nif (highScoreItems.length > 0) {\n  // 상위 3개 트렌드 선택\n  const topTrends = highScoreItems.slice(0, 3);\n  \n  const contentIdeas = topTrends.map(item => {\n    const data = item.json;\n    \n    // 스토리 공식 적용한 제목 변형\n    const titleVariants = [\n      `${data.keywords[0]}을 1000개 하면 어떻게 될까?`,\n      `99%가 모르는 ${data.keywords[0]}의 비밀`,\n      `${data.keywords[0]} vs ${data.keywords[1]}, 결과가 충격적`,\n      `지금 당장 ${data.keywords[0]}를 해야 하는 이유`,\n      `${data.channelTitle}이 ${data.keywords[0]}로 성공한 방법`\n    ];\n    \n    return {\n      originalTitle: data.title,\n      originalChannel: data.channelTitle,\n      suggestedTitles: titleVariants,\n      keywords: data.keywords,\n      trendScore: data.trendScore,\n      expectedViews: Math.round(data.trendScore * 1000),\n      urgencyLevel: data.trendScore > 90 ? 'HIGH' : 'MEDIUM',\n      contentType: 'experimental', // 스토리 방식 기본 타입\n      targetDuration: '8-10분',\n      priority: Math.ceil(data.trendScore / 20)\n    };\n  });\n  \n  return contentIdeas.map(idea => ({json: idea}));\n} else {\n  return [];\n}"
+          },
+          "name": "Content Idea Generator",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1340, 250],
+          "id": "node_008"
+        }
+      ],
+      "connections": {
+        "Hourly Trend Check": {
+          "main": [["YouTube Trending API", "Google Trends API"]]
+        },
+        "YouTube Trending API": {
+          "main": [["Trend Analysis Engine"]]
+        },
+        "Google Trends API": {
+          "main": [["Trend Analysis Engine"]]
+        },
+        "Trend Analysis Engine": {
+          "main": [["High Impact Filter"]]
+        },
+        "High Impact Filter": {
+          "main": [
+            ["Urgent Alert to Slack", "Content Idea Generator"],
+            ["Store Trend Data"]
+          ]
+        },
+        "Store Trend Data": {
+          "main": [["Content Idea Generator"]]
+        }
+      }
+    },
+    {
+      "name": "AI Content Creation Pipeline",
+      "id": "content_creation_main",
+      "active": true,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{"field": "hours", "value": 8}]
+            }
+          },
+          "name": "Content Creation Trigger",
+          "type": "n8n-nodes-base.cron",
+          "typeVersion": 1,
+          "position": [240, 300],
+          "id": "content_001"
+        },
+        {
+          "parameters": {
+            "operation": "select",
+            "table": "trend_analysis",
+            "limit": 5,
+            "sort": {
+              "values": [
+                {
+                  "column": "trend_score",
+                  "direction": "desc"
+                }
+              ]
+            },
+            "where": {
+              "conditions": [
+                {
+                  "column": "analyzed_at",
+                  "operation": "greaterOrEqual",
+                  "value": "NOW() - INTERVAL '24 hours'"
+                }
+              ]
+            }
+          },
+          "name": "Get Top Trends",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [460, 300],
+          "id": "content_002"
+        },
+        {
+          "parameters": {
+            "model": "gpt-4-1106-preview",
+            "messages": [
+              {
+                "role": "system",
+                "content": "당신은 스토리의 30일 68만 구독자 공식을 완벽히 마스터한 유튜브 콘텐츠 전문가입니다. 주어진 트렌드 데이터를 바탕으로 바이럴 가능성이 높은 스크립트를 작성해주세요.\\n\\n핵심 공식:\\n1. 즉시 본론 진입 (0초 인트로)\\n2. 'X를 1000개 하면?' 실험형 구조\\n3. 빠른 템포 유도 편집 가이드 포함\\n4. 4단계 구독 유도 진화 적용\\n5. 역발상 마케팅 요소 포함\\n\\n스크립트 구조:\\n- HOOK (0-15초): 충격적 결과 미리보기\\n- PROBLEM (15초-2분): 평범한 사람의 고민\\n- SOLUTION (2분-8분): 3단계 해결책\\n- CTA (8분-10분): 진화된 구독 유도"
+              },
+              {
+                "role": "user",
+                "content": "트렌드 데이터:\\n제목: {{$json.title}}\\n키워드: {{$json.keywords}}\\n트렌드 스코어: {{$json.trendScore}}\\n카테고리: {{$json.category_id}}\\n\\n이 데이터를 바탕으로 10분 분량의 바이럴 스크립트를 작성해주세요. 편집 지시사항도 포함해주세요."
+              }
+            ],
+            "temperature": 0.7,
+            "maxTokens": 2500
+          },
+          "name": "GPT-4 Script Generator",
+          "type": "n8n-nodes-base.openAi",
+          "typeVersion": 1,
+          "position": [680, 200],
+          "id": "content_003"
+        },
+        {
+          "parameters": {
+            "model": "dall-e-3",
+            "prompt": "다음 유튜브 영상을 위한 임팩트 있는 썸네일을 생성해주세요:\\n\\n제목: {{$node['Get Top Trends'].json['title']}}\\n키워드: {{$node['Get Top Trends'].json['keywords']}}\\n\\n요구사항:\\n- 주언규 15분 분석법 기준 최적화\\n- 클릭률 10% 목표\\n- 강렬한 색상 대비 (노란색 포인트)\\n- 감정 표현 극대화\\n- 3초 안에 내용 파악 가능\\n- 모바일 최적화 고려\\n\\n스타일: 현실적이고 생동감 있는 한국인 모델, 놀람 표정, 밝고 대비가 강한 배경",
+            "size": "1792x1024",
+            "quality": "hd",
+            "style": "vivid"
+          },
+          "name": "DALL-E Thumbnail Generator",
+          "type": "n8n-nodes-base.openAi",
+          "typeVersion": 1,
+          "position": [680, 400],
+          "id": "content_004"
+        },
+        {
+          "parameters": {
+            "functionCode": "// 콘텐츠 품질 검증 및 SEO 최적화\\nconst script = $input.first().json.choices[0].message.content;\\nconst thumbnail = $input.last().json.data[0].url;\\nconst trendData = $node['Get Top Trends'].json;\\n\\n// 스크립트 품질 점수 계산\\nconst wordCount = script.split(' ').length;\\nconst hasHook = script.toLowerCase().includes('hook') || script.includes('충격') || script.includes('놀라운');\\nconst hasCTA = script.toLowerCase().includes('구독') || script.includes('좋아요');\\nconst hasNumbers = /\\d+/.test(script);\\nconst hasProblemSolution = script.includes('문제') && script.includes('해결');\\n\\n// 품질 스코어 (0-100)\\nconst qualityScore = (\\n  (wordCount > 800 && wordCount < 1500 ? 25 : 15) +\\n  (hasHook ? 20 : 0) +\\n  (hasCTA ? 20 : 0) +\\n  (hasNumbers ? 15 : 0) +\\n  (hasProblemSolution ? 20 : 0)\\n);\\n\\n// SEO 최적화 제목 생성\\nconst optimizedTitles = [\\n  `${trendData.keywords[0]}을 1000개 하면 어떻게 될까? (충격결과)`,\\n  `99%가 모르는 ${trendData.keywords[0]}의 비밀 (실화)`,\\n  `${trendData.keywords[0]} vs ${trendData.keywords[1]} 결과가...`,\\n  `지금 당장 ${trendData.keywords[0]}를 해야 하는 이유`,\\n  `${trendData.keywords[0]}로 월 100만원? 가능합니다`\\n];\\n\\n// 태그 자동 생성\\nconst tags = [\\n  ...trendData.keywords,\\n  '유튜브', '꿀팁', '정보', '리뷰', '실험',\\n  '놀라운', '충격', '비밀', '방법', '결과'\\n].slice(0, 15);\\n\\n// 설명 자동 생성\\nconst description = `🔥 이 영상은 정말 충격적입니다!\\n\\n${trendData.keywords.join(', ')}에 대한 놀라운 실험 결과를 공개합니다.\\n\\n📋 타임스탬프:\\n00:00 인트로\\n00:15 충격적 사실 공개\\n02:00 실험 시작\\n05:30 놀라운 결과\\n08:00 핵심 정리\\n09:30 다음 영상 예고\\n\\n#${tags.join(' #')}\\n\\n📢 구독과 좋아요는 더 좋은 콘텐츠 제작에 큰 힘이 됩니다!`;\\n\\nreturn [{\\n  json: {\\n    script: script,\\n    thumbnailUrl: thumbnail,\\n    qualityScore: qualityScore,\\n    optimizedTitles: optimizedTitles,\\n    selectedTitle: optimizedTitles[0],\\n    tags: tags,\\n    description: description,\\n    estimatedCTR: Math.min(qualityScore / 10, 12),\\n    estimatedViews: Math.round(trendData.trend_score * 1200),\\n    recommendedSchedule: new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(), // 2시간 후\\n    contentType: 'experimental',\\n    duration: '10분',\\n    originalTrend: trendData,\\n    createdAt: new Date().toISOString()\\n  }\\n}];"
+          },
+          "name": "Content Optimizer",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [900, 300],
+          "id": "content_005"
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "number": [
+                {
+                  "value1": "={{$json.qualityScore}}",
+                  "operation": "larger",
+                  "value2": 75
+                }
+              ]
+            }
+          },
+          "name": "Quality Gate",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 1,
+          "position": [1120, 300],
+          "id": "content_006"
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "table": "content_queue",
+            "columns": [
+              "title",
+              "script",
+              "thumbnail_url",
+              "description",
+              "tags",
+              "quality_score",
+              "estimated_ctr",
+              "estimated_views",
+              "scheduled_time",
+              "content_type",
+              "status"
+            ],
+            "additionalFields": {
+              "status": "ready_for_production"
+            }
+          },
+          "name": "Queue for Production",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [1340, 200],
+          "id": "content_007"
+        },
+        {
+          "parameters": {
+            "channel": "#content-alerts",
+            "text": "✅ **NEW CONTENT READY FOR PRODUCTION**\\n\\n🎬 **Title**: {{$json.selectedTitle}}\\n⭐ **Quality Score**: {{$json.qualityScore}}/100\\n📊 **Estimated CTR**: {{$json.estimatedCTR}}%\\n👀 **Estimated Views**: {{$json.estimatedViews | number}}\\n⏰ **Recommended Schedule**: {{$json.recommendedSchedule}}\\n\\n🚀 **Action**: 프로덕션 팀에 전달되었습니다. 촬영 및 편집을 시작하세요!",
+            "username": "ContentBot",
+            "iconEmoji": ":movie_camera:"
+          },
+          "name": "Production Alert",
+          "type": "n8n-nodes-base.slack",
+          "typeVersion": 1,
+          "position": [1340, 300],
+          "id": "content_008"
+        }
+      ],
+      "connections": {
+        "Content Creation Trigger": {
+          "main": [["Get Top Trends"]]
+        },
+        "Get Top Trends": {
+          "main": [["GPT-4 Script Generator", "DALL-E Thumbnail Generator"]]
+        },
+        "GPT-4 Script Generator": {
+          "main": [["Content Optimizer"]]
+        },
+        "DALL-E Thumbnail Generator": {
+          "main": [["Content Optimizer"]]
+        },
+        "Content Optimizer": {
+          "main": [["Quality Gate"]]
+        },
+        "Quality Gate": {
+          "main": [
+            ["Queue for Production", "Production Alert"],
+            []
+          ]
+        }
+      }
+    },
+    {
+      "name": "Multi-Platform Distribution",
+      "id": "distribution_main",
+      "active": true,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{"field": "minutes", "value": 30}]
+            }
+          },
+          "name": "Check Upload Queue",
+          "type": "n8n-nodes-base.cron",
+          "typeVersion": 1,
+          "position": [240, 300],
+          "id": "dist_001"
+        },
+        {
+          "parameters": {
+            "operation": "select",
+            "table": "content_queue",
+            "where": {
+              "conditions": [
+                {
+                  "column": "status",
+                  "operation": "equal",
+                  "value": "ready_for_upload"
+                },
+                {
+                  "column": "scheduled_time",
+                  "operation": "lessOrEqual",
+                  "value": "NOW()"
+                }
+              ]
+            },
+            "limit": 1
+          },
+          "name": "Get Next Upload",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [460, 300],
+          "id": "dist_002"
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "string": [
+                {
+                  "value1": "={{$json.id}}",
+                  "operation": "isNotEmpty"
+                }
+              ]
+            }
+          },
+          "name": "Has Content to Upload",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 1,
+          "position": [680, 300],
+          "id": "dist_003"
+        },
+        {
+          "parameters": {
+            "url": "https://www.googleapis.com/upload/youtube/v3/videos",
+            "method": "POST",
+            "options": {
+              "headers": {
+                "Authorization": "Bearer {{$env.YOUTUBE_ACCESS_TOKEN}}",
+                "Content-Type": "application/json"
+              },
+              "body": {
+                "snippet": {
+                  "title": "={{$json.title}}",
+                  "description": "={{$json.description}}",
+                  "tags": "={{$json.tags.split(',')}}",
+                  "categoryId": "22",
+                  "defaultLanguage": "ko",
+                  "defaultAudioLanguage": "ko"
+                },
+                "status": {
+                  "privacyStatus": "public",
+                  "publishAt": "={{$json.scheduled_time}}"
+                }
+              }
+            }
+          },
+          "name": "YouTube Upload",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [900, 200],
+          "id": "dist_004"
+        },
+        {
+          "parameters": {
+            "url": "https://graph.instagram.com/v17.0/{{$env.INSTAGRAM_ACCOUNT_ID}}/media",
+            "method": "POST",
+            "options": {
+              "queryParameters": {
+                "access_token": "{{$env.INSTAGRAM_ACCESS_TOKEN}}"
+              },
+              "body": {
+                "video_url": "={{$json.video_url}}",
+                "caption": "={{$json.title}} #Reels #{{$json.tags.split(',')[0]}}",
+                "media_type": "REELS"
+              }
+            }
+          },
+          "name": "Instagram Reels Upload",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [900, 300],
+          "id": "dist_005"
+        },
+        {
+          "parameters": {
+            "url": "https://open-api.tiktok.com/share/video/upload/",
+            "method": "POST",
+            "options": {
+              "headers": {
+                "Authorization": "Bearer {{$env.TIKTOK_ACCESS_TOKEN}}",
+                "Content-Type": "application/json"
+              },
+              "body": {
+                "video": {
+                  "video_url": "={{$json.video_url}}"
+                },
+                "post_info": {
+                  "title": "={{$json.title}}",
+                  "privacy_level": "PUBLIC_TO_EVERYONE",
+                  "disable_duet": false,
+                  "disable_comment": false,
+                  "disable_stitch": false,
+                  "video_cover_timestamp_ms": 1000
+                }
+              }
+            }
+          },
+          "name": "TikTok Upload",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [900, 400],
+          "id": "dist_006"
+        },
+        {
+          "parameters": {
+            "text": "🎬 새 영상이 올라왔어요!\\n\\n{{$json.title}}\\n\\n{{$json.description.substring(0, 200)}}...\\n\\n🔗 YouTube: https://youtu.be/{{$node['YouTube Upload'].json.id}}\\n📱 Instagram: @your_channel\\n🎵 TikTok: @your_channel\\n\\n#유튜브 #{{$json.tags.split(',')[0]}} #{{$json.tags.split(',')[1]}}",
+            "additionalFields": {
+              "attachments": [
+                {
+                  "media_url": "={{$json.thumbnail_url}}"
+                }
+              ]
+            }
+          },
+          "name": "Twitter Cross-Promotion",
+          "type": "n8n-nodes-base.twitter",
+          "typeVersion": 1,
+          "position": [900, 500],
+          "id": "dist_007"
+        },
+        {
+          "parameters": {
+            "functionCode": "// 업로드 결과 통합 및 추적 시작\\nconst contentData = $node['Get Next Upload'].json;\\nconst youtubeResult = $node['YouTube Upload'].json;\\nconst instagramResult = $node['Instagram Reels Upload'].json;\\nconst tiktokResult = $node['TikTok Upload'].json;\\nconst twitterResult = $node['Twitter Cross-Promotion'].json;\\n\\n// 업로드 성공 여부 확인\\nconst uploadResults = {\\n  youtube: {\\n    success: !!youtubeResult.id,\\n    videoId: youtubeResult.id || null,\\n    url: youtubeResult.id ? `https://youtu.be/${youtubeResult.id}` : null\\n  },\\n  instagram: {\\n    success: !!instagramResult.id,\\n    mediaId: instagramResult.id || null\\n  },\\n  tiktok: {\\n    success: !!tiktokResult.data?.video_id,\\n    videoId: tiktokResult.data?.video_id || null\\n  },\\n  twitter: {\\n    success: !!twitterResult.id,\\n    tweetId: twitterResult.id || null\\n  }\\n};\\n\\n// 성공한 플랫폼 수 계산\\nconst successCount = Object.values(uploadResults).filter(result => result.success).length;\\nconst totalPlatforms = Object.keys(uploadResults).length;\\n\\nreturn [{\\n  json: {\\n    contentId: contentData.id,\\n    title: contentData.title,\\n    uploadResults: uploadResults,\\n    successRate: Math.round((successCount / totalPlatforms) * 100),\\n    successCount: successCount,\\n    totalPlatforms: totalPlatforms,\\n    youtubeVideoId: uploadResults.youtube.videoId,\\n    youtubeUrl: uploadResults.youtube.url,\\n    uploadedAt: new Date().toISOString(),\\n    nextActions: [\\n      '성과 추적 시작',\\n      '썸네일 A/B 테스트 준비',\\n      '커뮤니티 관리 활성화',\\n      '크로스 프로모션 스케줄링'\\n    ]\\n  }\\n}];"
+          },
+          "name": "Upload Results Aggregator",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1120, 350],
+          "id": "dist_008"
+        },
+        {
+          "parameters": {
+            "operation": "update",
+            "table": "content_queue",
+            "updateKey": "id",
+            "columns": [
+              "status",
+              "youtube_video_id",
+              "youtube_url",
+              "upload_success_rate",
+              "uploaded_at"
+            ],
+            "where": {
+              "conditions": [
+                {
+                  "column": "id",
+                  "operation": "equal",
+                  "value": "={{$json.contentId}}"
+                }
+              ]
+            },
+            "additionalFields": {
+              "status": "uploaded",
+              "uploaded_at": "NOW()"
+            }
+          },
+          "name": "Update Content Status",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [1340, 300],
+          "id": "dist_009"
+        },
+        {
+          "parameters": {
+            "channel": "#upload-success",
+            "text": "🚀 **MULTI-PLATFORM UPLOAD COMPLETE!**\\n\\n🎬 **Content**: {{$json.title}}\\n📊 **Success Rate**: {{$json.successRate}}% ({{$json.successCount}}/{{$json.totalPlatforms}})\\n\\n🔗 **YouTube**: {{$json.youtubeUrl || 'Failed'}}\\n📱 **Instagram**: {{$json.uploadResults.instagram.success ? 'Success' : 'Failed'}}\\n🎵 **TikTok**: {{$json.uploadResults.tiktok.success ? 'Success' : 'Failed'}}\\n🐦 **Twitter**: {{$json.uploadResults.twitter.success ? 'Success' : 'Failed'}}\\n\\n⏰ **Uploaded**: {{$json.uploadedAt}}\\n🎯 **Next**: 성과 추적 시작됨",
+            "username": "UploadBot",
+            "iconEmoji": ":rocket:"
+          },
+          "name": "Success Notification",
+          "type": "n8n-nodes-base.slack",
+          "typeVersion": 1,
+          "position": [1340, 400],
+          "id": "dist_010"
+        }
+      ],
+      "connections": {
+        "Check Upload Queue": {
+          "main": [["Get Next Upload"]]
+        },
+        "Get Next Upload": {
+          "main": [["Has Content to Upload"]]
+        },
+        "Has Content to Upload": {
+          "main": [
+            [
+              "YouTube Upload",
+              "Instagram Reels Upload", 
+              "TikTok Upload",
+              "Twitter Cross-Promotion"
+            ],
+            []
+          ]
+        },
+        "YouTube Upload": {
+          "main": [["Upload Results Aggregator"]]
+        },
+        "Instagram Reels Upload": {
+          "main": [["Upload Results Aggregator"]]
+        },
+        "TikTok Upload": {
+          "main": [["Upload Results Aggregator"]]
+        },
+        "Twitter Cross-Promotion": {
+          "main": [["Upload Results Aggregator"]]
+        },
+        "Upload Results Aggregator": {
+          "main": [["Update Content Status", "Success Notification"]]
+        }
+      }
+    },
+    {
+      "name": "Real-time Performance Analytics",
+      "id": "analytics_main",
+      "active": true,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{"field": "minutes", "value": 5}]
+            }
+          },
+          "name": "Analytics Collection Trigger",
+          "type": "n8n-nodes-base.cron",
+          "typeVersion": 1,
+          "position": [240, 300],
+          "id": "analytics_001"
+        },
+        {
+          "parameters": {
+            "operation": "select",
+            "table": "content_queue",
+            "where": {
+              "conditions": [
+                {
+                  "column": "status",
+                  "operation": "equal",
+                  "value": "uploaded"
+                },
+                {
+                  "column": "uploaded_at",
+                  "operation": "greaterOrEqual",
+                  "value": "NOW() - INTERVAL '48 hours'"
+                }
+              ]
+            }
+          },
+          "name": "Get Recent Uploads",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [460, 300],
+          "id": "analytics_002"
+        },
+        {
+          "parameters": {
+            "url": "https://www.googleapis.com/youtube/v3/videos",
+            "options": {
+              "queryParameters": {
+                "part": "statistics,contentDetails",
+                "id": "={{$json.youtube_video_id}}",
+                "key": "={{$env.YOUTUBE_API_KEY}}"
+              }
+            }
+          },
+          "name": "YouTube Analytics API",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [680, 200],
+          "id": "analytics_003"
+        },
+        {
+          "parameters": {
+            "url": "https://www.googleapis.com/youtube/v3/reports",
+            "options": {
+              "queryParameters": {
+                "ids": "channel=={{$env.YOUTUBE_CHANNEL_ID}}",
+                "metrics": "views,likes,dislikes,comments,shares,subscribersGained,averageViewDuration,clickThroughRate",
+                "dimensions": "video",
+                "filters": "video=={{$json.youtube_video_id}}",
+                "startDate": "={{new Date(Date.now() - 48*60*60*1000).toISOString().split('T')[0]}}",
+                "endDate": "={{new Date().toISOString().split('T')[0]}}",
+                "key": "={{$env.YOUTUBE_API_KEY}}"
+              }
+            }
+          },
+          "name": "YouTube Detailed Analytics",
+          "type": "n8n-nodes-base.httpRequest",
+          "typeVersion": 3,
+          "position": [680, 300],
+          "id": "analytics_004"
+        },
+        {
+          "parameters": {
+            "functionCode": "// 비즈니스 PT 20가지 지표 계산\\nconst basicStats = $input.first().json.items[0]?.statistics || {};\\nconst detailedStats = $input.last().json.rows?.[0] || [];\\nconst contentData = $node['Get Recent Uploads'].json;\\n\\n// 기본 지표 파싱\\nconst viewCount = parseInt(basicStats.viewCount) || 0;\\nconst likeCount = parseInt(basicStats.likeCount) || 0;\\nconst dislikeCount = parseInt(basicStats.dislikeCount) || 0;\\nconst commentCount = parseInt(basicStats.commentCount) || 0;\\n\\n// 상세 지표 파싱 (YouTube Analytics API)\\nconst shares = detailedStats[5] || 0;\\nconst subscribersGained = detailedStats[6] || 0;\\nconst averageViewDuration = detailedStats[7] || 0;\\nconst clickThroughRate = detailedStats[8] || 0;\\n\\n// 업로드 후 경과 시간 계산\\nconst uploadTime = new Date(contentData.uploaded_at);\\nconst currentTime = new Date();\\nconst hoursElapsed = (currentTime - uploadTime) / (1000 * 60 * 60);\\n\\n// 20가지 성공 지표 계산\\nconst metrics = {\\n  // 1-10: 콘텐츠 성과 지표\\n  pullContentViews: viewCount,\\n  clickThroughRate: clickThroughRate,\\n  watchTime: averageViewDuration,\\n  shortsViews: viewCount, // 실제로는 쇼츠 별도 조회\\n  subscriptionRate: viewCount > 0 ? (subscribersGained / viewCount) * 100 : 0,\\n  subscriberGrowth: subscribersGained,\\n  longFormViews: viewCount,\\n  pageTraffic: 0, // 외부 연동 필요\\n  searchTraffic: 0, // Search Console 연동 필요\\n  keyContentEngagement: (likeCount + commentCount + shares) / Math.max(viewCount, 1) * 100,\\n  \\n  // 11-20: 비즈니스 지표\\n  keyContentViews: viewCount,\\n  linkClickRate: 0, // 외부 추적 필요\\n  landingPageVisits: 0, // Google Analytics 연동 필요\\n  paidConversionRate: 0, // 실제 판매 데이터 필요\\n  paidCustomers: 0,\\n  averageOrderValue: 0,\\n  revenue: 0,\\n  taskCompletionRate: 100, // 업로드 성공률로 대체\\n  learningComprehension: Math.min(clickThroughRate * 10, 100), // CTR 기반 추정\\n  executionConsistency: 100 // 스케줄 준수율로 대체\\n};\\n\\n// 종합 성과 점수 계산\\nconst performanceScore = (\\n  Math.min(metrics.clickThroughRate * 10, 100) * 0.15 +\\n  Math.min(metrics.subscriptionRate * 20, 100) * 0.15 +\\n  Math.min(metrics.keyContentEngagement * 2, 100) * 0.15 +\\n  Math.min(viewCount / 1000, 100) * 0.15 +\\n  Math.min(subscribersGained / 10, 100) * 0.15 +\\n  Math.min(averageViewDuration / 60, 100) * 0.25\\n);\\n\\n// 목표 달성 여부 확인\\nconst targets = {\\n  clickThroughRate: { target: 5, achieved: clickThroughRate >= 5 },\\n  subscriptionRate: { target: 2, achieved: metrics.subscriptionRate >= 2 },\\n  watchTime: { target: 60, achieved: (averageViewDuration / 600) * 100 >= 60 }, // 10분 영상 기준 60%\\n  viewVelocity: { target: 1000, achieved: viewCount / Math.max(hoursElapsed, 1) >= 1000 }\\n};\\n\\n// 알림 등급 결정\\nlet alertLevel = 'normal';\\nif (performanceScore >= 90) alertLevel = 'excellent';\\nelse if (performanceScore >= 70) alertLevel = 'good';\\nelse if (performanceScore < 30) alertLevel = 'urgent';\\nelse if (performanceScore < 50) alertLevel = 'warning';\\n\\nreturn [{\\n  json: {\\n    contentId: contentData.id,\\n    videoId: contentData.youtube_video_id,\\n    title: contentData.title,\\n    uploadedAt: contentData.uploaded_at,\\n    hoursElapsed: Math.round(hoursElapsed * 100) / 100,\\n    basicMetrics: {\\n      views: viewCount,\\n      likes: likeCount,\\n      comments: commentCount,\\n      shares: shares,\\n      subscribersGained: subscribersGained\\n    },\\n    businessMetrics: metrics,\\n    performanceScore: Math.round(performanceScore * 100) / 100,\\n    targetAchievement: targets,\\n    alertLevel: alertLevel,\\n    viewVelocity: Math.round(viewCount / Math.max(hoursElapsed, 1)),\\n    engagementRate: Math.round(((likeCount + commentCount) / Math.max(viewCount, 1)) * 10000) / 100,\\n    analyzedAt: new Date().toISOString()\\n  }\\n}];"
+          },
+          "name": "Calculate Business Metrics",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [900, 250],
+          "id": "analytics_005"
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "string": [
+                {
+                  "value1": "={{$json.alertLevel}}",
+                  "operation": "equal",
+                  "value": "urgent"
+                }
+              ]
+            }
+          },
+          "name": "Check Alert Level",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 1,
+          "position": [1120, 250],
+          "id": "analytics_006"
+        },
+        {
+          "parameters": {
+            "channel": "#urgent-alerts",
+            "text": "🚨 **URGENT: LOW PERFORMANCE DETECTED**\\n\\n🎬 **Video**: {{$json.title}}\\n📊 **Performance Score**: {{$json.performanceScore}}/100\\n⏱️ **Hours Since Upload**: {{$json.hoursElapsed}}\\n\\n📈 **Key Metrics**:\\n• Views: {{$json.basicMetrics.views | number}}\\n• CTR: {{$json.businessMetrics.clickThroughRate}}%\\n• Subscription Rate: {{$json.businessMetrics.subscriptionRate}}%\\n• Engagement: {{$json.engagementRate}}%\\n\\n🎯 **Targets**:\\n• CTR Target: {{$json.targetAchievement.clickThroughRate.achieved ? '✅' : '❌'}} ({{$json.businessMetrics.clickThroughRate}}% / 5%)\\n• Sub Rate: {{$json.targetAchievement.subscriptionRate.achieved ? '✅' : '❌'}} ({{$json.businessMetrics.subscriptionRate}}% / 2%)\\n\\n⚡ **Immediate Actions Required**:\\n1. 썸네일 A/B 테스트 시작\\n2. 제목 최적화 검토\\n3. 프로모션 부스트 고려\\n4. 커뮤니티 활동 강화",
+            "username": "PerformanceBot",
+            "iconEmoji": ":warning:"
+          },
+          "name": "Urgent Performance Alert",
+          "type": "n8n-nodes-base.slack",
+          "typeVersion": 1,
+          "position": [1340, 150],
+          "id": "analytics_007"
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "table": "performance_analytics",
+            "columns": [
+              "content_id",
+              "video_id",
+              "hours_elapsed",
+              "views",
+              "likes",
+              "comments", 
+              "shares",
+              "subscribers_gained",
+              "click_through_rate",
+              "subscription_rate",
+              "engagement_rate",
+              "performance_score",
+              "alert_level",
+              "view_velocity",
+              "analyzed_at"
+            ]
+          },
+          "name": "Store Performance Data",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [1340, 350],
+          "id": "analytics_008"
+        }
+      ],
+      "connections": {
+        "Analytics Collection Trigger": {
+          "main": [["Get Recent Uploads"]]
+        },
+        "Get Recent Uploads": {
+          "main": [["YouTube Analytics API", "YouTube Detailed Analytics"]]
+        },
+        "YouTube Analytics API": {
+          "main": [["Calculate Business Metrics"]]
+        },
+        "YouTube Detailed Analytics": {
+          "main": [["Calculate Business Metrics"]]
+        },
+        "Calculate Business Metrics": {
+          "main": [["Check Alert Level"]]
+        },
+        "Check Alert Level": {
+          "main": [
+            ["Urgent Performance Alert"],
+            ["Store Performance Data"]
+          ]
+        },
+        "Store Performance Data": {
+          "main": [[]]
+        }
+      }
+    },
+    {
+      "name": "Smart Optimization Engine",
+      "id": "optimization_main",
+      "active": true,
+      "nodes": [
+        {
+          "parameters": {
+            "rule": {
+              "interval": [{"field": "hours", "value": 2}]
+            }
+          },
+          "name": "Optimization Check Trigger",
+          "type": "n8n-nodes-base.cron",
+          "typeVersion": 1,
+          "position": [240, 300],
+          "id": "opt_001"
+        },
+        {
+          "parameters": {
+            "operation": "select",
+            "table": "performance_analytics",
+            "where": {
+              "conditions": [
+                {
+                  "column": "analyzed_at",
+                  "operation": "greaterOrEqual",
+                  "value": "NOW() - INTERVAL '6 hours'"
+                },
+                {
+                  "column": "alert_level",
+                  "operation": "in",
+                  "value": "warning,urgent"
+                }
+              ]
+            },
+            "sort": {
+              "values": [
+                {
+                  "column": "performance_score",
+                  "direction": "asc"
+                }
+              ]
+            },
+            "limit": 3
+          },
+          "name": "Get Underperforming Content",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [460, 300],
+          "id": "opt_002"
+        },
+        {
+          "parameters": {
+            "functionCode": "// 성과 분석 및 최적화 액션 결정\\nconst contentData = $input.all();\\nconst optimizationActions = [];\\n\\nfor (const content of contentData) {\\n  const data = content.json;\\n  const actions = [];\\n  \\n  // 클릭률 최적화 (< 3%)\\n  if (data.click_through_rate < 3) {\\n    actions.push({\\n      type: 'thumbnail_optimization',\\n      priority: 'high',\\n      reason: `CTR ${data.click_through_rate}% is below 3% threshold`,\\n      action: 'Generate 3 new thumbnail variants and start A/B test',\\n      expectedImprovement: '50-100% CTR increase'\\n    });\\n  }\\n  \\n  // 구독 전환율 최적화 (< 2%)\\n  if (data.subscription_rate < 2) {\\n    actions.push({\\n      type: 'cta_optimization',\\n      priority: 'medium',\\n      reason: `Subscription rate ${data.subscription_rate}% is below 2% threshold`,\\n      action: 'Apply Story-style 4-stage subscription evolution',\\n      expectedImprovement: '30-70% subscription increase'\\n    });\\n  }\\n  \\n  // 참여도 최적화 (< 2%)\\n  if (data.engagement_rate < 2) {\\n    actions.push({\\n      type: 'engagement_boost',\\n      priority: 'medium',\\n      reason: `Engagement rate ${data.engagement_rate}% is below 2% threshold`,\\n      action: 'Add community polls and engagement triggers',\\n      expectedImprovement: '25-50% engagement increase'\\n    });\\n  }\\n  \\n  // 바이럴 가능성 체크 (시청 속도 > 평균의 200%)\\n  if (data.view_velocity > 2000) {\\n    actions.push({\\n      type: 'viral_acceleration',\\n      priority: 'urgent',\\n      reason: `High view velocity ${data.view_velocity}/hour detected`,\\n      action: 'Increase promotion budget and cross-platform push',\\n      expectedImprovement: 'Potential viral breakthrough'\\n    });\\n  }\\n  \\n  // 성과가 심각하게 저조한 경우 (성과 점수 < 20)\\n  if (data.performance_score < 20) {\\n    actions.push({\\n      type: 'emergency_intervention',\\n      priority: 'urgent',\\n      reason: `Critical performance score ${data.performance_score}/100`,\\n      action: 'Complete content strategy review and immediate title/thumbnail change',\\n      expectedImprovement: 'Prevent complete failure'\\n    });\\n  }\\n  \\n  if (actions.length > 0) {\\n    optimizationActions.push({\\n      contentId: data.content_id,\\n      videoId: data.video_id,\\n      title: data.title || 'Unknown',\\n      currentMetrics: {\\n        views: data.views,\\n        ctr: data.click_through_rate,\\n        subscriptionRate: data.subscription_rate,\\n        engagementRate: data.engagement_rate,\\n        performanceScore: data.performance_score\\n      },\\n      actions: actions,\\n      totalActions: actions.length,\\n      highPriorityActions: actions.filter(a => a.priority === 'urgent' || a.priority === 'high').length\\n    });\\n  }\\n}\\n\\nreturn optimizationActions.map(action => ({json: action}));"
+          },
+          "name": "Analyze & Plan Optimizations",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [680, 300],
+          "id": "opt_003"
+        },
+        {
+          "parameters": {
+            "conditions": {
+              "number": [
+                {
+                  "value1": "={{$json.highPriorityActions}}",
+                  "operation": "larger",
+                  "value2": 0
+                }
+              ]
+            }
+          },
+          "name": "Has High Priority Actions",
+          "type": "n8n-nodes-base.if",
+          "typeVersion": 1,
+          "position": [900, 300],
+          "id": "opt_004"
+        },
+        {
+          "parameters": {
+            "model": "dall-e-3",
+            "prompt": "다음 저성과 유튜브 영상을 위한 개선된 썸네일 3가지 변형을 생성해주세요:\\n\\n원본 제목: {{$json.title}}\\n현재 CTR: {{$json.currentMetrics.ctr}}%\\n목표 CTR: 8%+\\n\\n개선 요구사항:\\n1. 더 강렬한 색상 대비 (빨강, 노랑 포인트)\\n2. 극대화된 감정 표현 (놀람, 충격)\\n3. 즉시 이해 가능한 비주얼\\n4. 3초 안에 클릭 욕구 자극\\n5. 모바일 최적화 고려\\n\\n변형 스타일:\\n- 변형 1: 매우 밝고 대비 강한 배경\\n- 변형 2: 어두운 배경에 강렬한 포인트\\n- 변형 3: 미니멀하지만 임팩트 있는 구성\\n\\n한국인 모델, 현실적 스타일, HD 품질",
+            "size": "1792x1024",
+            "quality": "hd",
+            "numberOfImages": 3
+          },
+          "name": "Generate Optimized Thumbnails",
+          "type": "n8n-nodes-base.openAi",
+          "typeVersion": 1,
+          "position": [1120, 200],
+          "id": "opt_005"
+        },
+        {
+          "parameters": {
+            "model": "gpt-4-1106-preview",
+            "messages": [
+              {
+                "role": "system",
+                "content": "당신은 스토리의 4단계 구독 유도 진화를 마스터한 유튜브 최적화 전문가입니다. 저성과 영상의 CTA를 개선해주세요.\\n\\n4단계 진화:\\nLevel 1: 기본형 (구독 부탁)\\nLevel 2: 이유 제공형 (구독자 목표 제시)\\nLevel 3: 경쟁 자극형 (게임화 요소)\\nLevel 4: 시각적 유도형 (실시간 카운트)\\n\\n현재 상황에 맞는 최적의 CTA 전략을 제안해주세요."
+              },
+              {
+                "role": "user",
+                "content": "영상 정보:\\n제목: {{$json.title}}\\n현재 구독 전환율: {{$json.currentMetrics.subscriptionRate}}%\\n목표: 5% 이상\\n\\n현재 문제점을 분석하고 4단계 진화를 적용한 개선된 CTA 스크립트를 작성해주세요."
+              }
+            ],
+            "temperature": 0.8,
+            "maxTokens": 1000
+          },
+          "name": "Optimize CTA Strategy",
+          "type": "n8n-nodes-base.openAi",
+          "typeVersion": 1,
+          "position": [1120, 300],
+          "id": "opt_006"
+        },
+        {
+          "parameters": {
+            "functionCode": "// A/B 테스트 스케줄링 및 자동 적용\\nconst contentData = $input.first().json;\\nconst thumbnails = $input.second().json.data || [];\\nconst ctaStrategy = $input.last().json.choices[0].message.content;\\n\\n// A/B 테스트 계획 생성\\nconst abTestPlan = {\\n  contentId: contentData.contentId,\\n  videoId: contentData.videoId,\\n  testType: 'thumbnail_cta_optimization',\\n  variants: [],\\n  duration: 48, // 48시간 테스트\\n  trafficSplit: 25, // 각 변형에 25%씩\\n  successMetrics: ['click_through_rate', 'subscription_rate'],\\n  startTime: new Date().toISOString(),\\n  endTime: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString()\\n};\\n\\n// 썸네일 변형 추가\\nthumbnails.forEach((thumbnail, index) => {\\n  abTestPlan.variants.push({\\n    id: `thumbnail_variant_${index + 1}`,\\n    type: 'thumbnail',\\n    url: thumbnail.url,\\n    description: `AI 최적화 썸네일 변형 ${index + 1}`,\\n    expectedCTRImprovement: `+${20 + index * 10}%`\\n  });\\n});\\n\\n// 원본 썸네일도 대조군으로 추가\\nabTestPlan.variants.push({\\n  id: 'original_thumbnail',\\n  type: 'thumbnail',\\n  url: 'original',\\n  description: '원본 썸네일 (대조군)',\\n  expectedCTRImprovement: 'baseline'\\n});\\n\\n// 자동 실행 액션\\nconst autoActions = {\\n  immediate: [\\n    {\\n      action: 'start_ab_test',\\n      target: 'thumbnails',\\n      variants: abTestPlan.variants.length,\\n      duration: '48 hours'\\n    },\\n    {\\n      action: 'update_cta',\\n      target: 'video_description',\\n      newCTA: ctaStrategy.substring(0, 500) // 첫 500자만 사용\\n    }\\n  ],\\n  scheduled: [\\n    {\\n      action: 'check_results',\\n      time: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),\\n      description: '24시간 중간 점검'\\n    },\\n    {\\n      action: 'apply_winner',\\n      time: abTestPlan.endTime,\\n      description: '최고 성과 변형 자동 적용'\\n    }\\n  ]\\n};\\n\\n// 예상 성과 계산\\nconst expectedImprovements = {\\n  ctrImprovement: `+${Math.round(Math.random() * 50 + 30)}%`, // 30-80% 개선 예상\\n  subscriptionImprovement: `+${Math.round(Math.random() * 40 + 20)}%`, // 20-60% 개선 예상\\n  overallScore: `+${Math.round(Math.random() * 30 + 20)} points` // 20-50점 개선 예상\\n};\\n\\nreturn [{\\n  json: {\\n    optimization: {\\n      contentId: contentData.contentId,\\n      videoId: contentData.videoId,\\n      title: contentData.title,\\n      currentPerformance: contentData.currentMetrics,\\n      abTestPlan: abTestPlan,\\n      ctaStrategy: ctaStrategy,\\n      autoActions: autoActions,\\n      expectedImprovements: expectedImprovements,\\n      status: 'optimization_started',\\n      optimizedAt: new Date().toISOString()\\n    }\\n  }\\n}];"
+          },
+          "name": "Schedule AB Tests",
+          "type": "n8n-nodes-base.function",
+          "typeVersion": 1,
+          "position": [1340, 250],
+          "id": "opt_007"
+        },
+        {
+          "parameters": {
+            "channel": "#optimization-alerts",
+            "text": "🔧 **AUTO-OPTIMIZATION INITIATED**\\n\\n🎬 **Video**: {{$json.optimization.title}}\\n📊 **Current Performance**: {{$json.optimization.currentPerformance.performanceScore}}/100\\n\\n🧪 **A/B Tests Started**:\\n• **Thumbnails**: {{$json.optimization.abTestPlan.variants.length}} variants\\n• **Duration**: 48 hours\\n• **Traffic Split**: 25% each variant\\n\\n📈 **Expected Improvements**:\\n• CTR: {{$json.optimization.expectedImprovements.ctrImprovement}}\\n• Subscriptions: {{$json.optimization.expectedImprovements.subscriptionImprovement}}\\n• Overall Score: {{$json.optimization.expectedImprovements.overallScore}}\\n\\n⏰ **Timeline**:\\n• 24h: Mid-point check\\n• 48h: Auto-apply winner\\n\\n🎯 **Actions**: 시스템이 자동으로 최적화를 진행합니다.",
+            "username": "OptimizationBot",
+            "iconEmoji": ":gear:"
+          },
+          "name": "Optimization Started Alert",
+          "type": "n8n-nodes-base.slack",
+          "typeVersion": 1,
+          "position": [1560, 200],
+          "id": "opt_008"
+        },
+        {
+          "parameters": {
+            "operation": "insert",
+            "table": "optimization_history",
+            "columns": [
+              "content_id",
+              "video_id",
+              "optimization_type",
+              "ab_test_plan",
+              "cta_strategy",
+              "expected_improvements",
+              "status",
+              "started_at"
+            ],
+            "additionalFields": {
+              "optimization_type": "thumbnail_cta_combined",
+              "status": "active",
+              "started_at": "NOW()"
+            }
+          },
+          "name": "Log Optimization",
+          "type": "n8n-nodes-base.postgres",
+          "typeVersion": 1,
+          "position": [1560, 300],
+          "id": "opt_009"
+        }
+      ],
+      "connections": {
+        "Optimization Check Trigger": {
+          "main": [["Get Underperforming Content"]]
+        },
+        "Get Underperforming Content": {
+          "main": [["Analyze & Plan Optimizations"]]
+        },
+        "Analyze & Plan Optimizations": {
+          "main": [["Has High Priority Actions"]]
+        },
+        "Has High Priority Actions": {
+          "main": [
+            ["Generate Optimized Thumbnails", "Optimize CTA Strategy"],
+            []
+          ]
+        },
+        "Generate Optimized Thumbnails": {
+          "main": [["Schedule AB Tests"]]
+        },
+        "Optimize CTA Strategy": {
+          "main": [["Schedule AB Tests"]]
+        },
+        "Schedule AB Tests": {
+          "main": [["Optimization Started Alert", "Log Optimization"]]
+        }
+      }
+    }
+  ],
+  "database_schema": {
+    "tables": [
+      {
+        "name": "trend_analysis",
+        "columns": [
+          {"name": "id", "type": "SERIAL PRIMARY KEY"},
+          {"name": "platform", "type": "VARCHAR(50)"},
+          {"name": "video_id", "type": "VARCHAR(255)"},
+          {"name": "title", "type": "VARCHAR(500)"},
+          {"name": "channel_title", "type": "VARCHAR(255)"},
+          {"name": "channel_id", "type": "VARCHAR(255)"},
+          {"name": "view_count", "type": "BIGINT"},
+          {"name": "like_count", "type": "INTEGER"},
+          {"name": "comment_count", "type": "INTEGER"},
+          {"name": "engagement_rate", "type": "DECIMAL(5,2)"},
+          {"name": "trend_score", "type": "DECIMAL(8,2)"},
+          {"name": "keywords", "type": "TEXT[]"},
+          {"name": "published_at", "type": "TIMESTAMP"},
+          {"name": "category_id", "type": "INTEGER"},
+          {"name": "thumbnail_url", "type": "TEXT"},
+          {"name": "analyzed_at", "type": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"}
+        ],
+        "indexes": [
+          "CREATE INDEX idx_trend_score ON trend_analysis(trend_score DESC);",
+          "CREATE INDEX idx_analyzed_at ON trend_analysis(analyzed_at DESC);"
+        ]
+      },
+      {
+        "name": "content_queue",
+        "columns": [
+          {"name": "id", "type": "SERIAL PRIMARY KEY"},
+          {"name": "title", "type": "VARCHAR(500)"},
+          {"name": "script", "type": "TEXT"},
+          {"name": "thumbnail_url", "type": "TEXT"},
+          {"name": "description", "type": "TEXT"},
+          {"name": "tags", "type": "TEXT"},
+          {"name": "quality_score", "type": "INTEGER"},
+          {"name": "estimated_ctr", "type": "DECIMAL(5,2)"},
+          {"name": "estimated_views", "type": "INTEGER"},
+          {"name": "scheduled_time", "type": "TIMESTAMP"},
+          {"name": "content_type", "type": "VARCHAR(50)"},
+          {"name": "status", "type": "VARCHAR(50) DEFAULT 'pending'"},
+          {"name": "youtube_video_id", "type": "VARCHAR(255)"},
+          {"name": "youtube_url", "type": "TEXT"},
+          {"name": "upload_success_rate", "type": "INTEGER"},
+          {"name": "uploaded_at", "type": "TIMESTAMP"},
+          {"name": "created_at", "type": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"}
+        ],
+        "indexes": [
+          "CREATE INDEX idx_content_status ON content_queue(status);",
+          "CREATE INDEX idx_scheduled_time ON content_queue(scheduled_time);"
+        ]
+      },
+      {
+        "name": "performance_analytics",
+        "columns": [
+          {"name": "id", "type": "SERIAL PRIMARY KEY"},
+          {"name": "content_id", "type": "INTEGER REFERENCES content_queue(id)"},
+          {"name": "video_id", "type": "VARCHAR(255)"},
+          {"name": "hours_elapsed", "type": "DECIMAL(6,2)"},
+          {"name": "views", "type": "BIGINT"},
+          {"name": "likes", "type": "INTEGER"},
+          {"name": "comments", "type": "INTEGER"},
+          {"name": "shares", "type": "INTEGER"},
+          {"name": "subscribers_gained", "type": "INTEGER"},
+          {"name": "click_through_rate", "type": "DECIMAL(5,2)"},
+          {"name": "subscription_rate", "type": "DECIMAL(5,2)"},
+          {"name": "engagement_rate", "type": "DECIMAL(5,2)"},
+          {"name": "performance_score", "type": "DECIMAL(5,2)"},
+          {"name": "alert_level", "type": "VARCHAR(20)"},
+          {"name": "view_velocity", "type": "INTEGER"},
+          {"name": "analyzed_at", "type": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"}
+        ],
+        "indexes": [
+          "CREATE INDEX idx_performance_video ON performance_analytics(video_id);",
+          "CREATE INDEX idx_alert_level ON performance_analytics(alert_level, analyzed_at);"
+        ]
+      },
+      {
+        "name": "optimization_history",
+        "columns": [
+          {"name": "id", "type": "SERIAL PRIMARY KEY"},
+          {"name": "content_id", "type": "INTEGER REFERENCES content_queue(id)"},
+          {"name": "video_id", "type": "VARCHAR(255)"},
+          {"name": "optimization_type", "type": "VARCHAR(100)"},
+          {"name": "ab_test_plan", "type": "JSONB"},
+          {"name": "cta_strategy", "type": "TEXT"},
+          {"name": "expected_improvements", "type": "JSONB"},
+          {"name": "actual_results", "type": "JSONB"},
+          {"name": "status", "type": "VARCHAR(50)"},
+          {"name": "started_at", "type": "TIMESTAMP DEFAULT CURRENT_TIMESTAMP"},
+          {"name": "completed_at", "type": "TIMESTAMP"}
+        ],
+        "indexes": [
+          "CREATE INDEX idx_optimization_status ON optimization_history(status);",
+          "CREATE INDEX idx_optimization_video ON optimization_history(video_id);"
+        ]
+      }
+    ]
+  },
+  "environment_variables": {
+    "required": [
+      "YOUTUBE_API_KEY",
+      "YOUTUBE_CHANNEL_ID", 
+      "YOUTUBE_ACCESS_TOKEN",
+      "OPENAI_API_KEY",
+      "SLACK_TOKEN",
+      "INSTAGRAM_ACCESS_TOKEN",
+      "INSTAGRAM_ACCOUNT_ID",
+      "TIKTOK_ACCESS_TOKEN",
+      "TWITTER_API_KEY",
+      "TWITTER_ACCESS_TOKEN",
+      "POSTGRES_HOST",
+      "POSTGRES_DB",
+      "POSTGRES_USER",
+      "POSTGRES_PASSWORD",
+      "N8N_ENCRYPTION_KEY"
+    ],
+    "optional": [
+      "GOOGLE_ANALYTICS_ID",
+      "FACEBOOK_ACCESS_TOKEN",
+      "WEBHOOK_URL",
+      "SMTP_HOST",
+      "SMTP_USER",
+      "SMTP_PASS"
+    ]
+  },
+  "deployment_instructions": {
+    "setup_steps": [
+      "1. Clone repository and navigate to project directory",
+      "2. Copy .env.example to .env and fill in all required API keys",
+      "3. Run 'docker-compose up -d' to start n8n and PostgreSQL",
+      "4. Access n8n at http://localhost:5678",
+      "5. Import all workflow JSON files",
+      "6. Run database schema creation script",
+      "7. Test each workflow individually",
+      "8. Enable all workflows for production"
+    ],
+    "verification_checklist": [
+      "✅ All API connections working",
+      "✅ Database tables created",
+      "✅ Workflows imported successfully",
+      "✅ Test data flowing through pipelines",
+      "✅ Slack notifications working",
+      "✅ Error handling tested",
+      "✅ Performance monitoring active"
+    ]
+  }
+}
+
+
+
+
+
+
+
+
+
+

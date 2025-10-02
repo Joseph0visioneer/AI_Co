@@ -1,0 +1,93 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  projects  Project[]
+  meetings  Meeting[]
+  keywords  Keyword[]
+
+  @@map("users")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  description String?
+  color       String   @default("#3B82F6")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetings Meeting[]
+
+  @@map("projects")
+}
+
+model Meeting {
+  id             String  @id @default(cuid())
+  userId         String  @map("user_id")
+  projectId      String? @map("project_id")
+  title          String
+  originalContent String @map("original_content")
+  analysisResult Json    @map("analysis_result")
+  fileUrl        String? @map("file_url")
+  fileType       String? @map("file_type")
+  shareToken     String? @unique @map("share_token")
+  isPublic       Boolean @default(false) @map("is_public")
+  createdAt      DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user     User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project  Project?          @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  keywords MeetingKeyword[]
+
+  @@map("meetings")
+}
+
+model Keyword {
+  id           String   @id @default(cuid())
+  userId       String   @map("user_id")
+  keyword      String
+  frequency    Int      @default(1)
+  lastMentioned DateTime @default(now()) @map("last_mentioned")
+  category     String?
+
+  // Relations
+  user     User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  meetings MeetingKeyword[]
+
+  @@unique([userId, keyword])
+  @@map("keywords")
+}
+
+model MeetingKeyword {
+  meetingId      String @map("meeting_id")
+  keywordId      String @map("keyword_id")
+  relevanceScore Float  @default(1.0) @map("relevance_score")
+
+  // Relations
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
+  keyword Keyword @relation(fields: [keywordId], references: [id], onDelete: Cascade)
+
+  @@id([meetingId, keywordId])
+  @@map("meeting_keywords")
+}

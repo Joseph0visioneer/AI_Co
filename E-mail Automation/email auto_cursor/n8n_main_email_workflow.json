@@ -1,0 +1,316 @@
+{
+  "name": "학회 이메일 자동화 - 메인 워크플로우",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "8b8c1c0b-74dc-4b99-9c2e-0f7f2f5e1234",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "documentId": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "sheetName": "Sheet1",
+        "range": "A:G",
+        "options": {
+          "headerRow": true
+        }
+      },
+      "id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+      "name": "Google Sheets - 참석자 데이터 읽기",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        460,
+        300
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "google-sheets-credential-id",
+          "name": "Google Sheets Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 입력 데이터 검증 및 필터링\nconst inputData = items[0].json;\nconst validEmails = [];\n\n// Google Sheets에서 읽은 데이터가 배열 형태인지 확인\nconst rowsData = Array.isArray(inputData) ? inputData : inputData.values || [];\n\nfor (const row of rowsData) {\n  // 이메일 형식 검증\n  const emailRegex = /^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$/;\n  \n  if (emailRegex.test(row.이메일) && \n      row.이름 && \n      row.국가 && \n      row.초록등급) {\n    \n    // 템플릿 선택 로직\n    let templateType = '';\n    let emailSubject = '';\n    let emailBody = '';\n    \n    if (row.초록등급 === 'A') {\n      templateType = 'premium_invite';\n      emailSubject = `${row.이름}님, 프리미엄 학회 참석 초대`;\n      emailBody = `안녕하세요 ${row.이름}님,\\n\\n${row.소속}에서 오시는 것을 진심으로 환영합니다.\\n\\n🌟 프리미엄 참석자 특전:\\n- VIP 라운지 이용\\n- 특별 네트워킹 세션\\n- 우선 질의응답 기회\\n\\n📍 발표 정보:\\n- 시간: ${row.발표시간}\\n- 초록등급: ${row.초록등급} (최우수)\\n- Travel Grant: ${row.Travel_Grant}\\n\\n추가 문의사항이 있으시면 언제든 연락 바랍니다.\\n\\n감사합니다.\\n학회 운영진`;\n    } else if (row.초록등급 === 'B') {\n      templateType = 'standard_invite';\n      emailSubject = `${row.이름}님, 학회 참석 안내`;\n      emailBody = `안녕하세요 ${row.이름}님,\\n\\n${row.소속}에서 오시는 것을 환영합니다.\\n\\n📋 참석 정보:\\n- 발표시간: ${row.발표시간}\\n- 초록등급: ${row.초록등급}\\n- Travel Grant: ${row.Travel_Grant}\\n\\n학회 일정 및 프로그램에 대한 자세한 정보는 첨부된 가이드를 참조해 주세요.\\n\\n감사합니다.\\n학회 운영진`;\n    } else {\n      templateType = 'basic_invite';\n      emailSubject = `${row.이름}님, 학회 참석 확인`;\n      emailBody = `안녕하세요 ${row.이름}님,\\n\\n${row.소속}에서의 참석을 확인합니다.\\n\\n기본 정보:\\n- 초록등급: ${row.초록등급}\\n- Travel Grant: ${row.Travel_Grant}\\n\\n학회 당일 안내사항을 추후 별도로 발송드리겠습니다.\\n\\n감사합니다.\\n학회 운영진`;\n    }\n    \n    validEmails.push({\n      name: row.이름,\n      email: row.이메일,\n      country: row.국가,\n      grade: row.초록등급,\n      affiliation: row.소속,\n      presentationTime: row.발표시간,\n      travelGrant: row.Travel_Grant,\n      templateType: templateType,\n      personalizedSubject: emailSubject,\n      personalizedBody: emailBody,\n      processedAt: new Date().toISOString()\n    });\n  } else {\n    // 유효하지 않은 데이터 로깅\n    console.log(`Invalid data for row: ${JSON.stringify(row)}`);\n  }\n}\n\nconsole.log(`Processed ${validEmails.length} valid emails out of ${rowsData.length} total rows`);\n\nreturn validEmails.map(email => ({ json: email }));"
+      },
+      "id": "b2c3d4e5-f6a7-8901-bcde-f23456789012",
+      "name": "데이터 검증 및 템플릿 선택",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        680,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "sendEmail",
+        "to": "={{ $json.email }}",
+        "subject": "={{ $json.personalizedSubject }}",
+        "bodyType": "text",
+        "body": "={{ $json.personalizedBody }}",
+        "options": {
+          "priority": "normal"
+        }
+      },
+      "id": "c3d4e5f6-a7b8-9012-cdef-345678901234",
+      "name": "Microsoft Outlook - 이메일 발송",
+      "type": "n8n-nodes-base.microsoftOutlook",
+      "typeVersion": 2,
+      "position": [
+        900,
+        300
+      ],
+      "credentials": {
+        "microsoftOutlookOAuth2Api": {
+          "id": "outlook-credential-id",
+          "name": "Microsoft Outlook Account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "timestamp",
+              "value": "={{ $now }}"
+            },
+            {
+              "name": "recipient_email",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "recipient_name",
+              "value": "={{ $json.name }}"
+            },
+            {
+              "name": "template_type",
+              "value": "={{ $json.templateType }}"
+            },
+            {
+              "name": "status",
+              "value": "sent"
+            },
+            {
+              "name": "country",
+              "value": "={{ $json.country }}"
+            },
+            {
+              "name": "grade",
+              "value": "={{ $json.grade }}"
+            },
+            {
+              "name": "affiliation",
+              "value": "={{ $json.affiliation }}"
+            },
+            {
+              "name": "presentation_time",
+              "value": "={{ $json.presentationTime }}"
+            },
+            {
+              "name": "travel_grant",
+              "value": "={{ $json.travelGrant }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "d4e5f6a7-b8c9-0123-defa-456789012345",
+      "name": "발송 결과 로깅",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        300
+      ]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "email-log",
+        "options": {}
+      },
+      "id": "e5f6a7b8-c9d0-1234-efab-567890123456",
+      "name": "Webhook - 로그 전송",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        1340,
+        300
+      ],
+      "webhookId": "email-automation-log"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "error-condition",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notExists"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f6a7b8c9-d0e1-2345-fabc-678901234567",
+      "name": "오류 처리 분기",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        900,
+        480
+      ]
+    },
+    {
+      "parameters": {
+        "values": {
+          "string": [
+            {
+              "name": "error_timestamp",
+              "value": "={{ $now }}"
+            },
+            {
+              "name": "error_recipient",
+              "value": "={{ $json.email }}"
+            },
+            {
+              "name": "error_message",
+              "value": "이메일 발송 실패"
+            },
+            {
+              "name": "error_details",
+              "value": "={{ $json.error }}"
+            },
+            {
+              "name": "status",
+              "value": "failed"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "a7b8c9d0-e1f2-3456-abcd-789012345678",
+      "name": "오류 로깅",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3,
+      "position": [
+        1120,
+        580
+      ]
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Google Sheets - 참석자 데이터 읽기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets - 참석자 데이터 읽기": {
+      "main": [
+        [
+          {
+            "node": "데이터 검증 및 템플릿 선택",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "데이터 검증 및 템플릿 선택": {
+      "main": [
+        [
+          {
+            "node": "Microsoft Outlook - 이메일 발송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Microsoft Outlook - 이메일 발송": {
+      "main": [
+        [
+          {
+            "node": "발송 결과 로깅",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "오류 처리 분기",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "발송 결과 로깅": {
+      "main": [
+        [
+          {
+            "node": "Webhook - 로그 전송",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "오류 처리 분기": {
+      "main": [
+        [],
+        [
+          {
+            "node": "오류 로깅",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {},
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "staticData": null,
+  "tags": [
+    {
+      "createdAt": "2025-01-20T10:00:00.000Z",
+      "updatedAt": "2025-01-20T10:00:00.000Z",
+      "id": "conference-email-automation",
+      "name": "학회 이메일 자동화"
+    }
+  ],
+  "triggerCount": 1,
+  "updatedAt": "2025-01-20T10:00:00.000Z",
+  "versionId": "1.0.0"
+}
